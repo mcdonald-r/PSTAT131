@@ -1,0 +1,251 @@
+---
+title: "Homework 3"
+author: "PSTAT 131"
+output:
+    html_document:
+      toc: true
+      toc_float: true
+      code_folding: show
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE,
+                      warning = FALSE)
+
+library(tidymodels)
+library(ISLR)
+library(ISLR2)
+library(tidyverse)
+library(ggthemes)
+library(corrr)
+library(corrplot)
+library(discrim)
+library(klaR)
+library(dplyr)
+library(MASS)
+tidymodels_prefer()
+
+titanic_data <- read_csv("data/titanic.csv")
+titanic_data <- titanic_data %>%
+  mutate(survived = factor(survived, levels = c("Yes", "No")),
+         pclass = factor(pclass))
+```
+
+## Binary Classification
+
+For this assignment, we will be working with part of a [Kaggle data set](https://www.kaggle.com/c/titanic/overview) that was the subject of a machine learning competition and is often used for practicing ML models. The goal is classification; specifically, to predict which passengers would survive the [Titanic shipwreck](https://en.wikipedia.org/wiki/Titanic).
+
+![Fig. 1: RMS Titanic departing Southampton on April 10, 1912.](images/RMS_Titanic.jpg){width="363"}
+
+Load the data from `data/titanic.csv` into *R* and familiarize yourself with the variables it contains using the codebook (`data/titanic_codebook.txt`).
+
+Notice that `survived` and `pclass` should be changed to factors. When changing `survived` to a factor, you may want to reorder the factor so that *"Yes"* is the first level.
+
+Make sure you load the `tidyverse` and `tidymodels`!
+
+*Remember that you'll need to set a seed at the beginning of the document to reproduce your results.*
+
+### Question 1
+
+Split the data, stratifying on the outcome variable, `survived.` You should choose the proportions to split the data into. Verify that the training and testing data sets have the appropriate number of observations. Take a look at the training data and note any potential issues, such as missing data.
+
+Why is it a good idea to use stratified sampling for this data?
+```{r}
+set.seed(0217)
+# summary(data.titanic)
+
+data.titanic.split <- initial_split(titanic_data, strata = survived, prop = 0.7)
+
+titanic_train <- training(data.titanic.split)
+titanic_test <- testing(data.titanic.split)
+
+summary(titanic_train)
+summary(titanic_test)
+```
+Some potential issues that may occur later on are due to the missing data in the age column which is apparent in both the training data set and the testing data set. It is a good idea to use stratified sampling, because it ensures that the survived variable is properly represented of the population we are conducing tests on. 
+
+### Question 2
+
+Using the **training** data set, explore/describe the distribution of the outcome variable `survived`.
+```{r}
+ggplot(aes(x = survived), data = titanic_train) +
+  geom_bar()
+table(titanic_train$survived)
+```
+The variable survived has more 'No' in the categories than 'Yes', by about 160, with the total values in 'Yes' 239 and 'No' 384. 
+
+Create a [percent stacked bar chart](https://r-graph-gallery.com/48-grouped-barplot-with-ggplot2) (recommend using `ggplot`) with `survived` on the *x*-axis and `fill = sex`. Do you think `sex` will be a good predictor of the outcome?
+```{r}
+ggplot(titanic_train, aes(fill=sex, x=survived)) + 
+    geom_bar(position="fill")
+```
+Yes I think sex would be a good predictor, since it seems that when it comes to men, most didn't survived and woman were more likely to survive. 
+
+Create one more percent stacked bar chart of `survived`, this time with `fill = pclass`. Do you think passenger class will be a good predictor of the outcome?
+```{r}
+ggplot(titanic_train, aes(fill=pclass, x=survived)) + 
+    geom_bar(position="fill")
+```
+Yes, although not as obvious as the dispairity when it comes to sex, but there were more in class 3 that didn't survive and most in class 1 that did survive.
+
+Why do you think it might be more useful to use a [percent stacked bar chart](https://r-graph-gallery.com/48-grouped-barplot-with-ggplot2) as opposed to a traditional stacked bar chart?
+
+I think it is more useful than traditional stacked bar charts, becuase it shows the proportion of the different value in each variable other than just the total numbers. 
+
+### Question 3
+
+Using the **training** data set, create a correlation matrix of all continuous variables. Visualize the matrix and describe any patterns you see. Are any predictors correlated with each other? Which ones, and in which direction?
+```{r}
+titanic_train %>% 
+  select(where(is.numeric)) %>% 
+  cor(use = "pairwise.complete.obs") %>% 
+  corrplot(type = "lower", diag = FALSE)
+```
+Yes, the patterns are between the fare and age, number of siblings/spouses, and # of parents/children, which are all a positive correlation. There is also # of parents/children and number of siblings/spouses, which is a positive correlation.
+When it comes to negative correlation it is number of siblings/spouses with age as well as # of parents/children with age.
+
+### Question 4
+
+Using the **training** data, create a recipe predicting the outcome variable `survived`. Include the following predictors: ticket class, sex, age, number of siblings or spouses aboard, number of parents or children aboard, and passenger fare.
+
+Recall that there were missing values for `age`. To deal with this, add an imputation step using `step_impute_linear()`. Next, use `step_dummy()` to **dummy** encode categorical predictors. Finally, include interactions between:
+
+-   Sex and passenger fare, and
+-   Age and passenger fare.
+
+You'll need to investigate the `tidymodels` documentation to find the appropriate step functions to use.
+```{r}
+titanic_recipe <- recipe(survived ~ pclass + sex + age + sib_sp + parch + fare, data = titanic_train) %>%
+  step_impute_linear(age) %>%
+  step_dummy(all_nominal_predictors(), one_hot = TRUE) %>%
+  step_interact(terms = ~ sex_female:fare) %>%
+  step_interact(terms = ~ age:fare)
+```
+
+### Question 5
+
+Specify a **logistic regression** model for classification using the `"glm"` engine. Then create a workflow. Add your model and the appropriate recipe. Finally, use `fit()` to apply your workflow to the **training** data.
+
+***Hint: Make sure to store the results of `fit()`. You'll need them later on.***
+```{r}
+log_reg_model <- logistic_reg() %>%
+  set_engine("glm") %>%
+  set_mode("classification")
+
+titanic_workflow <- workflow() %>%
+  add_model(log_reg_model) %>%
+  add_recipe(titanic_recipe)
+
+titanic_fit <- fit(titanic_workflow, titanic_train)
+```
+
+### Question 6
+
+**Repeat Question 5**, but this time specify a linear discriminant analysis model for classification using the `"MASS"` engine.
+```{r}
+lda_model <- discrim_linear() %>%
+  set_engine("MASS") %>%
+  set_mode("classification")
+
+lda_workflow <- workflow() %>%
+  add_model(lda_model) %>%
+  add_recipe(titanic_recipe)
+
+lda_fit <- fit(lda_workflow, titanic_train)
+```
+
+### Question 7
+
+**Repeat Question 5**, but this time specify a quadratic discriminant analysis model for classification using the `"MASS"` engine.
+```{r}
+titanic_recipe_simple <- recipe(survived ~ pclass + sex + age + fare, data = titanic_train) %>%
+  step_impute_linear(age) %>%
+  step_dummy(all_nominal_predictors())
+
+qda_model <- discrim_quad() %>%
+  set_engine("MASS") %>%
+  set_mode("classification")
+
+qda_workflow <- workflow() %>%
+  add_model(qda_model) %>%
+  add_recipe(titanic_recipe_simple)
+
+qda_fit <- fit(qda_workflow, titanic_train)
+```
+
+### Question 8
+
+**Repeat Question 5**, but this time specify a *k*-nearest neighbors model for classification using the `"kknn"` engine. Choose a value for *k* to try.
+```{r}
+knn_model <- nearest_neighbor(neighbors = 7) %>% 
+  set_engine("kknn") %>%
+  set_mode("classification")
+
+knn_workflow <- workflow() %>%
+  add_model(knn_model) %>%
+  add_recipe(titanic_recipe)
+
+knn_fit <- fit(knn_workflow, titanic_train)
+```
+
+### Question 9
+
+Now you've fit four different models to your training data.
+
+Use `predict()` and `bind_cols()` to generate predictions using each of these 4 models and your **training** data. Then use the metric of **area under the ROC curve** to assess the performance of each of the four models.
+```{r}
+log_reg_preds <- predict(titanic_fit, titanic_train, type = "prob") %>%
+  bind_cols(titanic_train %>% select(survived))
+
+lda_preds <- predict(lda_fit, titanic_train, type = "prob") %>%
+  bind_cols(titanic_train %>% select(survived))
+
+qda_preds <- predict(qda_fit, titanic_train, type = "prob") %>%
+  bind_cols(titanic_train %>% select(survived))
+
+knn_preds <- predict(knn_fit, titanic_train, type = "prob") %>%
+  bind_cols(titanic_train %>% select(survived))
+
+log_reg_auc <- roc_auc(log_reg_preds, truth = survived, .pred_Yes)
+
+lda_auc <- roc_auc(lda_preds, truth = survived, .pred_Yes)
+
+qda_auc <- roc_auc(qda_preds, truth = survived, .pred_Yes)
+
+knn_auc <- roc_auc(knn_preds, truth = survived, .pred_Yes)
+
+log_reg_auc
+lda_auc 
+qda_auc 
+knn_auc
+```
+
+### Question 10
+
+Fit all four models to your **testing** data and report the AUC of each model on the **testing** data. Which model achieved the highest AUC on the **testing** data?
+
+The models that achieved the highest AUC on the testing dat was the KNN model.
+
+Using your top-performing model, create a confusion matrix and visualize it. Create a plot of its ROC curve.
+```{r}
+augment(knn_fit, new_data = titanic_train) %>%
+  conf_mat(truth = survived, estimate = .pred_class) %>%
+  autoplot(type = "heatmap")
+
+knn_train_preds <- predict(knn_fit, titanic_train, type = "prob") %>%
+  bind_cols(titanic_train %>% select(survived))
+
+train_auc <- roc_auc(knn_train_preds, truth = survived, .pred_Yes)
+
+knn_test_preds <- predict(knn_fit, titanic_test, type = "prob") %>%
+  bind_cols(titanic_test %>% select(survived))
+
+test_auc <- roc_auc(knn_test_preds, truth = survived, .pred_Yes)
+
+train_auc
+test_auc
+```
+
+How did your best model perform? Compare its **training** and **testing** AUC values. If the values differ, why do you think this is so?
+
+The values are different and the training data is very high and better than the test data, so I have a feeling that the model was overfitted to the test data.
